@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API</title>
+</head>
+<body>
+    <header>
+        <nav>
+
+        </nav>
+    </header>
+    <main style="display: flex; flex-direction: row; gap: 2%;">
+        <div style="overflow: scroll; width: 30%; height: 800px;">
+            <h4>main.go</h4>
+            <pre>
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+    "net/http"
+    "os"
+    "strings"
+    "time"
+
+    jwt "github.com/dgrijalva/jwt-go"
+    _ "github.com/go-sql-driver/mysql"
+    "github.com/gorilla/mux"
+)
+
+var db *sql.DB
+var err error
+
+var mySigningKey = []byte(os.Getenv("JWT_SECRET")) // set JWT_TOKEN=some_token or JWT_TOKEN go run .
+
+func GenerateJWT(username string) (string, error) {
+    token := jwt.New(jwt.SigningMethodHS256)
+
+    claims := token.Claims.(jwt.MapClaims)
+    claims["authorized"] = true
+    claims["username"] = username
+    claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
+
+    tokenString, err := token.SignedString(mySigningKey)
+    if err != nil {
+        return "", err
+    }
+
+    return tokenString, nil
+}
+
+func ConnectToDB() {
+    db, err = sql.Open("mysql", "root:usbw@tcp(127.0.0.1:3307)/abc") //login:password@protocol(ip)/table
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+
+func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "Missing authorization header", http.StatusUnauthorized)
+            return
+        }
+
+        bearerToken := strings.Split(authHeader, " ")
+        if len(bearerToken) != 2 {
+            http.Error(w, "Invalid token format", http.StatusUnauthorized)
+            return
+        }
+
+        token, err := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+            }
+            return mySigningKey, nil
+        })
+
+        if err != nil {
+            http.Error(w, "Invalid token", http.StatusUnauthorized)
+            return
+        }
+
+        if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+            r.Header.Set("Username", claims["username"].(string))
+            next.ServeHTTP(w, r)
+        } else {
+            http.Error(w, "Invalid token", http.StatusUnauthorized)
+        }
+    }
+}
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+
+        // Логируем информацию о запросе
+        log.Printf("Запрос: %s %s", r.Method, r.URL.Path)
+        w.Header().Set("Content-Type", "application/json")
+
+        // Передаём управление следующему обработчику
+        next.ServeHTTP(w, r)
+
+        // Вычисляем время выполнения запроса
+        duration := time.Since(start)
+        log.Printf("Время выполнения запроса: %s", duration)
+    })
+}
+
+func RecoveryMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if err := recover(); err != nil {
+                w.WriteHeader(http.StatusInternalServerError)
+                fmt.Fprintf(w, `{"error": "Internal server error"}`)
+                log.Printf("Recovered from panic: %v", err)
+            }
+        }()
+        next.ServeHTTP(w, r)
+    })
+}
+
+func handleRequest() {
+    myRouter := mux.NewRouter().StrictSlash(true)
+
+    myRouter.HandleFunc("/api/v1/SignIn", login).Methods("POST")
+    myRouter.HandleFunc("/api/v1/Documents", AuthMiddleware(allDocuments)).Methods("GET")
+    myRouter.HandleFunc("/api/v1/Documents/{id}", AuthMiddleware(oneDocument)).Methods("GET")                //id:[0-9]+ при регулярном выражении mux выдает 404, по тз нужно 400
+    myRouter.HandleFunc("/api/v1/Document/{id}/Comments", AuthMiddleware(getDocumentComment)).Methods("GET") //TODO: проверка id на неверные значения и вызов ошибки 400 вместо 404, т.к. "не верный запрос" проводится в теле функции
+    myRouter.HandleFunc("/api/v1/Document/{id}/Comments", AuthMiddleware(postDocumentComment)).Methods("POST")
+
+    handler := LoggingMiddleware(RecoveryMiddleware(myRouter))
+
+    log.Fatal(http.ListenAndServe(":8080", handler))
+}
+
+func main() {
+
+    log.Println("Server Run...\nhttp://localhost:8080/api/v1/")
+    ConnectToDB()
+    defer db.Close()
+    handleRequest()
+}
+                </pre>
+        </div>
+        <div style="overflow: scroll; width: 30%; height: 800px;">
+            <h4>json.go</h4>
+            <pre>
+package main
+
+type LogIn struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Token string `json:"token"`
+}
+
+type Document struct {
+	Id          int    `json:"id"`
+	Title       string `json:"title"`
+	DateCreated string `json:"date_created"`
+	DateUpdated string `json:"date_updated"`
+	Category    string `json:"category"`
+	HasComments bool   `json:"has_comments"`
+}
+
+type Documents []Document
+
+type Comment struct {
+	Id          int    `json:"id"`
+	Document_id int    `json:"document_id"`
+	Text        string `json:"text"`
+	DateCreated string `json:"date_created"`
+	DateUpdated string `json:"date_updated"`
+	Author      struct {
+		Name     string `json:"name"`
+		Position string `json:"position"`
+	}
+}
+
+type Comments []Comment
+
+type Error struct {
+	Timestamp int64  `json:"timestamp"`
+	Message   string `json:"message"`
+	ErrorCode int    `json:"errorCode"`
+}
+            </pre>
+        </div>
+        <div style="overflow: scroll; width: 30%; height: 800px;">
+            <h4>
+                handlers.go
+            </h4>
+            <pre>
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/gorilla/mux"
+)
+
+func login(w http.ResponseWriter, r *http.Request) {
+	var loginData LogIn
+	err := json.NewDecoder(r.Body).Decode(&loginData)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	token, err := GenerateJWT(loginData.Name)
+	if err != nil {
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	response := LoginResponse{Token: token}
+	json.NewEncoder(w).Encode(response)
+}
+
+func getDocumentComment(w http.ResponseWriter, r *http.Request) {
+
+	vars := mux.Vars(r)
+	docID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid document ID", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.Query(`
+        SELECT c.id, c.document_id, c.text, c.date_created, c.date_updated, 
+               u.name, u.position
+        FROM comments c
+        JOIN users u ON c.author_id = u.id
+        WHERE c.document_id = ?
+    `, docID)
+	if err != nil {
+		log.Printf("Error querying comments: %v", err)
+		http.Error(w, "Failed to retrieve comments", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var comments Comments
+	for rows.Next() {
+		var c Comment
+		err := rows.Scan(
+			&c.Id,
+			&c.Document_id,
+			&c.Text,
+			&c.DateCreated,
+			&c.DateUpdated,
+			&c.Author.Name,
+			&c.Author.Position,
+		)
+		if err != nil {
+			log.Printf("Error scanning comment row: %v", err)
+			continue
+		}
+		comments = append(comments, c)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating comment rows: %v", err)
+		http.Error(w, "Error retrieving comments", http.StatusInternalServerError)
+		return
+	}
+
+	if comments == nil {
+
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(Error{time.Now().Unix(), "Не найдены комментарии для документа", 2345})
+		return
+	}
+
+	json.NewEncoder(w).Encode(comments)
+}
+
+func postDocumentComment(w http.ResponseWriter, r *http.Request) {
+	var comment Comment
+
+	err := json.NewDecoder(r.Body).Decode(&comment)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	vars := mux.Vars(r)
+	docID, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		http.Error(w, "Invalid document ID", http.StatusBadRequest)
+		return
+	}
+	if docID != comment.Document_id {
+		http.Error(w, "Invalid document ID", http.StatusBadRequest)
+		return
+	}
+
+	stmt, err := db.Prepare(`
+		INSERT INTO comments (id, document_id, text, date_created, date_updated, author_id)
+		SELECT ?, ?, ?, ?, ?, users.id
+		FROM users
+		WHERE users.name = ? AND users.position = ?
+	`)
+	if err != nil {
+		log.Printf("Error preparing statement: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	now := time.Now().Format("2006-01-02 15:04:05")
+	result, err := stmt.Exec(
+		comment.Id,
+		comment.Document_id,
+		comment.Text,
+		now,
+		now,
+		comment.Author.Name,
+		comment.Author.Position,
+	)
+
+	if err != nil {
+		log.Printf("Error executing statement: %v", err)
+		http.Error(w, "Failed to post comment", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error checking rows affected: %v", err)
+		http.Error(w, "Failed to verify comment insertion", http.StatusInternalServerError)
+		return
+	}
+	if rowsAffected == 0 {
+		http.Error(w, "No matching user found or comment not inserted", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(comment)
+}
+
+func allDocuments(w http.ResponseWriter, r *http.Request) {
+	query := `
+        SELECT id, title, date_created, date_updated, category, has_comments
+        FROM documents 
+    `
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Printf("Error querying documents: %v", err)
+		http.Error(w, "Failed to retrieve documents", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var documents Documents
+
+	for rows.Next() {
+		var doc Document
+		var has_comments bool
+		if doc.HasComments {
+			has_comments = true
+		} else {
+			has_comments = false
+		}
+
+		err := rows.Scan(
+			&doc.Id,
+			&doc.Title,
+			&doc.DateCreated,
+			&doc.DateUpdated,
+			&doc.Category,
+			has_comments,
+		)
+		if err != nil {
+			log.Printf("Error scanning document row: %v", err)
+			continue
+		}
+		documents = append(documents, doc)
+	}
+
+	if err = rows.Err(); err != nil {
+		log.Printf("Error iterating document rows: %v", err)
+		http.Error(w, "Error retrieving documents", http.StatusInternalServerError)
+		return
+	}
+
+	if documents == nil {
+		documents = Documents{}
+	}
+
+	json.NewEncoder(w).Encode(documents)
+}
+
+func oneDocument(w http.ResponseWriter, r *http.Request) {
+
+	documents := Documents{
+		Document{1, "somw title", "2024-05-01 14:44:44", "2024-05-01 14:44:44", "some", false},
+		Document{2, "some another title", "2024-05-01 14:44:44", "2024-05-01 14:44:44", "some", true},
+	}
+	id, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	var selectedDocument Document
+	found := false
+
+	for _, doc := range documents {
+		if doc.Id == id {
+			selectedDocument = doc
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		http.Error(w, "Document not found", http.StatusNotFound)
+		return
+	} else {
+
+		json.NewEncoder(w).Encode(selectedDocument)
+
+	}
+
+}
+
+            </pre>
+        </div>
+    </main>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SQL</title>
+</head>
+<body>
+    <header>
+        <nav>
+
+        </nav>
+    </header>
+    <main style="display: flexbox; flex-direction: row;">
+        <div style="display: inline-block; border: 2px, black, solid; padding: 1%;">
+        <h3>SELECT</h3>
+        <pre><code>
+    SELECT column1, column2 FROM table_name;
+
+    SELECT * FROM employees;
+
+    SELECT name, age FROM employees WHERE age > 30;
+        </code></pre>
+
+        <h3>INSERT</h3>
+        <pre><code>
+    INSERT INTO table_name (column1, column2) VALUES (value1, value2);
+
+    INSERT INTO employees (name, age) VALUES ('John Doe', 35);
+        </code></pre>
+
+        <h3>UPDATE</h3>
+        <pre><code>
+    UPDATE table_name
+    SET column1 = value1, column2 = value2
+    WHERE condition;
+
+    UPDATE employees
+    SET salary = 50000 
+    WHERE id = 1;
+        </code></pre>
+
+        <h3>DELETE</h3>
+        <pre><code>
+    DELETE FROM table_name WHERE condition;
+
+    DELETE FROM employees WHERE age > 60;
+        </code></pre>
+
+        <h3>WHERE</h3>
+        <pre><code>
+    SELECT * FROM employees WHERE department = 'IT';
+        </code></pre>
+
+        <h3>ORDER BY</h3>
+        <pre><code>
+    SELECT * FROM employees ORDER BY salary; --от А-Я или по убыванию
+
+    SELECT * FROM employees ORDER BY salary DESC; -- в обратном порядке
+        </code></pre>
+
+        <h3>JOIN</h3>
+        <pre><code>
+    SELECT employees.name, departments.name
+    FROM employees
+    JOIN departments ON employees.dept_id = departments.id;
+        </code></pre>
+    </div>
+        <div style="display: inline-block; border: 2px, black, solid; padding: 1%;">
+<h4>INSERT with a SELECT subquery:</h4>
+<pre><code>
+INSERT INTO target_table (column1, column2)
+SELECT column1, column2 
+FROM source_table 
+WHERE condition;
+</code></pre>
+
+<h4>INSERT using CASE:</h4>
+<pre><code>
+INSERT INTO employees (name, salary, category)
+SELECT 
+  name,
+  salary,
+  CASE 
+    WHEN salary < 30000 THEN 'Low'
+    WHEN salary BETWEEN 30000 AND 60000 THEN 'Medium'
+    ELSE 'High'
+  END AS category
+FROM candidates;
+</code></pre>
+
+<h4>INSERT with RAND() for generating random values:</h4>
+<pre><code>
+INSERT INTO test_table (id, random_number)
+SELECT 
+  id,
+  FLOOR(RAND() * 100) + 1 AS random_number
+FROM 
+  (SELECT 1 AS id UNION SELECT 2 UNION SELECT 3) AS temp;
+</code></pre>
+
+<h4>Combined approach with subqueries and functions:</h4>
+<pre><code>
+INSERT INTO sales_report (product, quantity, total_amount, category)
+SELECT 
+  p.name,
+  SUM(o.quantity),
+  SUM(o.quantity * p.price),
+  CASE 
+    WHEN SUM(o.quantity) > 100 THEN 'High Demand'
+    WHEN SUM(o.quantity) BETWEEN 50 AND 100 THEN 'Medium Demand'
+    ELSE 'Low Demand'
+  END
+FROM products p
+JOIN orders o ON p.id = o.product_id
+WHERE o.date BETWEEN '2023-01-01' AND '2023-12-31'
+GROUP BY p.id, p.name;
+</code></pre>
+
+<h4>INSERT using a correlated subquery:</h4>
+<pre><code>
+INSERT INTO top_sellers (name, sales, rank)
+SELECT 
+  s.name,
+  s.sales,
+  (SELECT COUNT(*) + 1 
+   FROM sellers s2 
+   WHERE s2.sales > s.sales) AS rank
+FROM sellers s;
+</code></pre>
+
+
+
+        </div>
+        <hr>
+    </main>
+</body>
+</html>
